@@ -125,7 +125,7 @@ jobs:
       - name: Pull latest images
         run: |
           echo "Pulling the latest Docker image..."
-          docker pull ${{ secrets.AWS_ECR_LOGIN_URI }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
+          docker pull ${{ secrets.AWS_ECR_LOGIN_URI }}:latest
 
       - name: Run Docker Image to serve users
         run: |
@@ -138,7 +138,7 @@ jobs:
             -e 'AWS_REGION=${{ secrets.AWS_REGION }}' \
             -e 'MONGO_DB_URL=${{ secrets.MONGO_DB_URL }}' \
             -e 'DAGSHUB_TOKEN=${{ secrets.DAGSHUB_TOKEN }}' \
-            ${{ secrets.AWS_ECR_LOGIN_URI }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
+            ${{ secrets.AWS_ECR_LOGIN_URI }}:latest
 
       - name: Clean previous images and containers
         run: |
