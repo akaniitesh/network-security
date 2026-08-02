@@ -26,108 +26,76 @@ jobs:
       - name: Run Unit Tests
         run: echo "Running unit tests"
 
-  build-and-push-ecr-image:
-    name: Continuous Delivery
-    needs: integration
-    runs-on: ubuntu-latest
+build-and-push-ecr-image:
+  name: Continuous Delivery
+  needs: integration
+  runs-on: ubuntu-latest
 
-    # expose the final image as a job output so subsequent jobs can reference the exact pushed image
-    outputs:
-      image: ${{ steps.push_image.outputs.image }}
+  steps:
+    - uses: actions/checkout@v4
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Install Utilities
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq unzip
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+    - name: Build and Push Docker Image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+      run: |
+        IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        echo "IMAGE=$IMAGE"
 
-      - name: Create ECR Repository if it does not exist
-        env:
-          REPOSITORY_NAME: ${{ secrets.ECR_REPOSITORY_NAME }}
-        run: |
-          aws ecr describe-repositories --repository-names $REPOSITORY_NAME || \
-          aws ecr create-repository --repository-name $REPOSITORY_NAME
+        docker build -t $IMAGE .
+        docker push $IMAGE
 
-      - name: Build, Tag and Push Docker Image
-        id: push_image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
-          IMAGE_TAG: latest
-        run: |
-          IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+Continuous-Deployment:
+  name: Continuous Deployment
+  needs: build-and-push-ecr-image
+  runs-on: self-hosted
 
-          echo "Building Image: $IMAGE"
+  steps:
 
-          docker build -t $IMAGE .
+    - uses: actions/checkout@v4
 
-          docker push $IMAGE
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-          echo "Docker Image pushed successfully."
+    - name: Login to Amazon ECR
+      uses: aws-actions/amazon-ecr-login@v2
 
-          # export the pushed image name as a step output so it can be referenced as a job output
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+    - name: Pull Docker Image
+      run: |
+        docker pull ${{ secrets.AWS_ECR_LOGIN_URI }}:latest
 
-  Continuous-Deployment:
-    name: Continuous Deployment
-    needs: build-and-push-ecr-image
-    runs-on: self-hosted
+    - name: Stop Existing Container
+      run: |
+        docker stop networksecurity || true
+        docker rm networksecurity || true
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    - name: Run Container
+      run: |
+        docker run -d \
+          --name networksecurity \
+          --restart unless-stopped \
+          -p 8080:8080 \
+          --ipc=host \
+          -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
+          -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+          -e AWS_REGION=${{ secrets.AWS_REGION }} \
+          ${{ secrets.AWS_ECR_LOGIN_URI }}:latest
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Pull Latest Docker Image
-        run: |
-          IMAGE=${{ needs.build-and-push-ecr-image.outputs.image }}
-
-          echo "Pulling $IMAGE"
-
-          docker pull $IMAGE
-
-      - name: Stop Existing Container
-        run: |
-          docker stop networksecurity || true
-          docker rm networksecurity || true
-
-      - name: Run Docker Container
-        run: |
-          IMAGE=${{ needs.build-and-push-ecr-image.outputs.image }}
-
-          docker run -d \
-            --name networksecurity \
-            --restart unless-stopped \
-            -p 8080:8080 \
-            --ipc=host \
-            -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
-            -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
-            -e AWS_REGION=${{ secrets.AWS_REGION }} \
-            $IMAGE
-
-      - name: Remove Unused Docker Images
-        run: docker image prune -af
+    - name: Cleanup
+      run: docker image prune -af
