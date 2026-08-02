@@ -31,9 +31,6 @@ jobs:
     needs: integration
     runs-on: ubuntu-latest
 
-    outputs:
-      image: ${{ steps.build-image.outputs.image }}
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -62,18 +59,21 @@ jobs:
           aws ecr create-repository --repository-name $REPOSITORY_NAME
 
       - name: Build, Tag and Push Docker Image
-        id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
           IMAGE_TAG: latest
 
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "Building Image: $IMAGE"
 
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker build -t $IMAGE .
+
+          docker push $IMAGE
+
+          echo "Docker Image pushed successfully."
 
   Continuous-Deployment:
     name: Continuous Deployment
@@ -92,11 +92,20 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Pull Latest Docker Image
+        env:
+          ECR_REGISTRY: ${{ secrets.AWS_ECR_LOGIN_URI }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+
         run: |
-          docker pull ${{ needs.build-and-push-ecr-image.outputs.image }}
+          IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          echo "Pulling $IMAGE"
+
+          docker pull $IMAGE
 
       - name: Stop Existing Container
         run: |
@@ -104,7 +113,13 @@ jobs:
           docker rm networksecurity || true
 
       - name: Run Docker Container
+        env:
+          ECR_REGISTRY: ${{ secrets.AWS_ECR_LOGIN_URI }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+
         run: |
+          IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:latest
+
           docker run -d \
             --name networksecurity \
             --restart unless-stopped \
@@ -113,8 +128,7 @@ jobs:
             -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
             -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
             -e AWS_REGION=${{ secrets.AWS_REGION }} \
-            ${{ needs.build-and-push-ecr-image.outputs.image }}
+            $IMAGE
 
       - name: Remove Unused Docker Images
-        run: |
-          docker image prune -af
+        run: docker image prune -af
