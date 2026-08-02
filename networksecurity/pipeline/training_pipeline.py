@@ -23,6 +23,8 @@ from networksecurity.entity.artifact_entity import (
     DataTransformationArtifact,
     ModelTrainerArtifact,
 )
+import dagshub
+dagshub.init(repo_owner='akaniitesh', repo_name='network-security', mlflow=True, token=os.getenv("DAGSHUB_TOKEN"))
 
 from networksecurity.constant.training_pipeline import TRAINING_BUCKET_NAME
 from networksecurity.cloud.s3_syncer import S3Sync
