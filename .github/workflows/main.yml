@@ -1,4 +1,4 @@
-name: workflow
+name: Network Security CI/CD
 
 on:
   push:
