@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MONGO_DB_URL=os.getenv("MONGO_DB_URL")
-print(MONGO_DB_URL)
+print("MONGO_DB_URL is set" if MONGO_DB_URL else "MONGO_DB_URL is not set")
 
 import certifi
 ca=certifi.where()
@@ -35,11 +35,18 @@ class NetworkDataExtract():
         
     def insert_data_mongodb(self,records,database,collection):
         try:
+            if not MONGO_DB_URL:
+                raise Exception("MONGO_DB_URL environment variable is not set")
+
             self.database=database
             self.collection=collection
             self.records=records
 
-            self.mongo_client=pymongo.MongoClient(MONGO_DB_URL)
+            self.mongo_client=pymongo.MongoClient(
+                MONGO_DB_URL,
+                tlsCAFile=ca,
+                serverSelectionTimeoutMS=30000,
+            )
             self.database = self.mongo_client[self.database]
             
             self.collection=self.database[self.collection]
@@ -49,7 +56,7 @@ class NetworkDataExtract():
             raise NetworkSecurityException(e,sys)
         
 if __name__=='__main__':
-    FILE_PATH="Network_Data\phisingData.csv"      #FILE_PATH = os.path.join("Network_Data", "phisingData.csv")
+    FILE_PATH=os.path.join("Network_Data", "phisingData.csv")
     DATABASE="NiteshDB"
     Collection="NetworkData"
     networkobj=NetworkDataExtract()

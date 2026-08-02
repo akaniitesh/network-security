@@ -1,6 +1,8 @@
 import os
 import sys
 
+import dagshub
+
 from networksecurity.exception.exception import NetworkSecurityException
 from networksecurity.logging.logger import logging
 
@@ -23,18 +25,33 @@ from networksecurity.entity.artifact_entity import (
     DataTransformationArtifact,
     ModelTrainerArtifact,
 )
-import dagshub
-dagshub.init(repo_owner='akaniitesh', repo_name='network-security', mlflow=True, token=os.getenv("DAGSHUB_TOKEN"))
 
 from networksecurity.constant.training_pipeline import TRAINING_BUCKET_NAME
 from networksecurity.cloud.s3_syncer import S3Sync
 from networksecurity.constant.training_pipeline import SAVED_MODEL_DIR
 import sys
 
+
+def init_dagshub_tracking():
+    """
+    Configure DagsHub/MLflow if it is available, without blocking app startup.
+    The installed dagshub version does not support passing token= to init().
+    """
+    try:
+        dagshub.init(
+            repo_owner="akaniitesh",
+            repo_name="network-security",
+            mlflow=True,
+        )
+    except Exception as e:
+        logging.warning(f"DagsHub tracking was not initialized: {e}")
+
+
 class TrainingPipeline:
     def __init__(self):
         self.training_pipeline_config=TrainingPipelineConfig()
         self.s3_sync = S3Sync()
+        init_dagshub_tracking()
     
 
     def start_data_ingestion(self):

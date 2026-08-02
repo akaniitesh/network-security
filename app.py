@@ -6,8 +6,7 @@ ca = certifi.where()
 
 from dotenv import load_dotenv
 load_dotenv()
-mongo_db_url = os.getenv("MONGODB_URL_KEY")
-print(mongo_db_url)
+mongo_db_url = os.getenv("MONGO_DB_URL")
 import pymongo
 from networksecurity.exception.exception import NetworkSecurityException
 from networksecurity.logging.logger import logging
@@ -25,13 +24,16 @@ from networksecurity.utils.main_utils.utils import load_object
 from networksecurity.utils.ml_utils.model.estimator import NetworkModel
 
 
-client = pymongo.MongoClient(mongo_db_url, tlsCAFile=ca)
-
 from networksecurity.constant.training_pipeline import DATA_INGESTION_COLLECTION_NAME
 from networksecurity.constant.training_pipeline import DATA_INGESTION_DATABASE_NAME
 
-database = client[DATA_INGESTION_DATABASE_NAME]
-collection = database[DATA_INGESTION_COLLECTION_NAME]
+def get_mongo_collection():
+    if not mongo_db_url:
+        raise Exception("MONGO_DB_URL environment variable is not set")
+
+    client = pymongo.MongoClient(mongo_db_url, tlsCAFile=ca, serverSelectionTimeoutMS=30000)
+    database = client[DATA_INGESTION_DATABASE_NAME]
+    return database[DATA_INGESTION_COLLECTION_NAME]
 
 app = FastAPI()
 origins = ["*"]
@@ -64,22 +66,24 @@ async def train_route():
 async def predict_route(request: Request,file: UploadFile = File(...)):
     try:
         df=pd.read_csv(file.file)
+        prediction_input = df.drop(columns=["Result"], errors="ignore")
         preprocesor=load_object("final_model/preprocessor.pkl")
         final_model=load_object("final_model/model.pkl")
         network_model = NetworkModel(preprocessor=preprocesor,model=final_model)
-        print(df.iloc[0])
-        y_pred = network_model.predict(df)
-        print(y_pred)
+        y_pred = network_model.predict(prediction_input)
         df['predicted_column'] = y_pred
-        print(df['predicted_column'])
-        df.to_csv('prediction_output/output.csv')
+        os.makedirs("prediction_output", exist_ok=True)
+        df.to_csv('prediction_output/output.csv', index=False)
         table_html = df.to_html(classes='table table-striped')
-        return templates.TemplateResponse(request=request,
-                                            name="table.html",
-                                            context={"table": table_html}
-                                        )
+        return templates.TemplateResponse(
+            request=request,
+            name="table.html",
+            context={"table": table_html},
+        )
+        
     except Exception as e:
         raise NetworkSecurityException(e,sys)
+
     
 if __name__=="__main__":
     app_run(app,host="0.0.0.0",port=8000)
